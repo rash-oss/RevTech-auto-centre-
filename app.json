@@ -1,0 +1,29 @@
+{
+  "expo": {
+    "name": "RevTech Auto Centre",
+    "slug": "revtech-auto-centre",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#08090b"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.revtechautocentre.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#08090b"
+      },
+      "package": "com.revtechautocentre.app"
+    },
+    "web": {
+      "favicon": "./assets/icon.png"
+    }
+  }
+}
