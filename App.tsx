@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  AppState,
   Alert,
   Image,
   Linking,
@@ -8,18 +9,22 @@ import {
   ScrollView,
   StatusBar,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { VehiclesScreen } from './src/components/VehiclesScreen';
 import { AuthScreen } from './src/components/AuthScreen';
 import { StaffDashboard } from './src/components/StaffDashboard';
 import { useAuth } from './src/hooks/useAuth';
+import { usePushNotifications } from './src/hooks/usePushNotifications';
 import { isBackendConfigured, supabase } from './src/lib/supabase';
 import type { Booking } from './src/types';
 
 type Tab = 'Home' | 'Book' | 'Bookings' | 'Account' | 'Staff';
+type AccountPage = 'menu' | 'vehicles' | 'notifications' | 'privacy' | 'terms';
 
 const services = [
   { icon: '🛠️', name: 'Vehicle Repair', detail: 'Diagnostics and repairs' },
@@ -48,6 +53,12 @@ export default function App() {
   const [notes, setNotes] = useState('');
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [bookingBusy, setBookingBusy] = useState(false);
+  const [accountPage, setAccountPage] = useState<AccountPage>('menu');
+  const [pushEnabled, setPushEnabled] = useState(true);
+  const [bookingUpdates, setBookingUpdates] = useState(true);
+  const [appointmentReminders, setAppointmentReminders] = useState(true);
+
+  usePushNotifications(session);
 
   const isStaff = profile?.role === 'staff' || profile?.role === 'admin';
   const tabs = isStaff ? [...customerTabs, { key: 'Staff' as Tab, icon: '◆' }] : customerTabs;
@@ -62,6 +73,14 @@ export default function App() {
     setTab('Book');
   };
 
+  const currentUser = useRef(session?.user.id);
+  currentUser.current = session?.user.id;
+  useEffect(() => {
+    setBookings([]); setName(''); setPhone(''); setRegistration(''); setNotes('');
+    setAccountPage('menu');
+  }, [session?.user.id]);
+  useEffect(() => { if (profile) { setName(profile.full_name); setPhone(profile.phone); } }, [profile]);
+
   const loadBookings = useCallback(async () => {
     if (!session || !isBackendConfigured) return;
     const { data, error } = await supabase
@@ -69,11 +88,48 @@ export default function App() {
       .select('*')
       .eq('customer_id', session.user.id)
       .order('created_at', { ascending: false });
+    if (currentUser.current !== session.user.id) return;
     if (error) Alert.alert('Could not load bookings', error.message);
     else setBookings((data || []) as Booking[]);
   }, [session]);
 
-  useEffect(() => { loadBookings(); }, [loadBookings]);
+  useEffect(() => {
+    if (tab !== 'Bookings') return;
+    void loadBookings();
+    const listener = AppState.addEventListener('change', state => { if (state === 'active') void loadBookings(); });
+    const timer = setInterval(() => { if (AppState.currentState === 'active') void loadBookings(); }, 30000);
+    return () => { listener.remove(); clearInterval(timer); };
+  }, [loadBookings, tab]);
+
+  useEffect(() => {
+    if (!session) return;
+    supabase.from('notification_preferences').select('*').eq('user_id', session.user.id).single()
+      .then(({ data }) => {
+        if (!data) return;
+        setPushEnabled(data.push_enabled);
+        setBookingUpdates(data.booking_updates);
+        setAppointmentReminders(data.appointment_reminders);
+      });
+  }, [session]);
+
+  const saveNotificationPreference = async (field: string, value: boolean) => {
+    if (!session) return;
+    const setters: Record<string, (next: boolean) => void> = {
+      push_enabled: setPushEnabled,
+      booking_updates: setBookingUpdates,
+      appointment_reminders: setAppointmentReminders,
+    };
+    setters[field]?.(value);
+    const { error } = await supabase.from('notification_preferences').upsert({
+      user_id: session.user.id,
+      [field]: value,
+      updated_at: new Date().toISOString(),
+    });
+    if (error) {
+      setters[field]?.(!value);
+      Alert.alert('Could not save preference', error.message);
+    }
+  };
 
   const submitBooking = async () => {
     if (!canSubmit) {
@@ -85,11 +141,14 @@ export default function App() {
       Alert.alert('Sign in required', 'Create or sign in to your secure account before requesting a booking.');
       return;
     }
+    if (bookingBusy) return;
     setBookingBusy(true);
+    const { error: contactError } = await supabase.from('profiles').update({ full_name: name.trim(), phone: phone.trim() }).eq('id', session.user.id).select('id').single();
+    if (contactError) { setBookingBusy(false); Alert.alert('Contact details not saved', contactError.message); return; }
     const { error } = await supabase.from('bookings').insert({
       customer_id: session.user.id,
       service,
-      registration: registration.trim(),
+      registration: registration.replace(/\s/g, '').toUpperCase(),
       preferred_date: date.trim(),
       notes: notes.trim() || null,
     });
@@ -184,7 +243,7 @@ export default function App() {
   );
 
   const Bookings = () => (
-    <ScrollView contentContainerStyle={styles.content}>
+    <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <Text style={styles.pageTitle}>My bookings</Text>
       {bookings.length ? bookings.map((booking) => (
         <View style={styles.bookingCard} key={booking.id}>
@@ -222,8 +281,39 @@ export default function App() {
     </ScrollView>
   );
 
-  const Account = () => (
-    <ScrollView contentContainerStyle={styles.content}>
+  const LegalPage = ({ title, children }: { title: string; children: React.ReactNode }) => (
+    <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <TouchableOpacity onPress={() => setAccountPage('menu')}><Text style={styles.back}>‹ Account</Text></TouchableOpacity>
+      <Text style={styles.pageTitle}>{title}</Text>
+      <View style={styles.legalCard}>{children}</View>
+    </ScrollView>
+  );
+
+  const NotificationsPage = () => (
+    <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <TouchableOpacity onPress={() => setAccountPage('menu')}><Text style={styles.back}>‹ Account</Text></TouchableOpacity>
+      <Text style={styles.pageTitle}>Notifications</Text>
+      <Text style={styles.pageIntro}>Choose which RevTech updates you receive.</Text>
+      {[
+        ['Push notifications', 'Allow notifications on this device', pushEnabled, 'push_enabled'],
+        ['Booking updates', 'Status changes including ready for collection', bookingUpdates, 'booking_updates'],
+        ['Appointment reminders', 'Reminders about confirmed bookings', appointmentReminders, 'appointment_reminders'],
+      ].map(([title, detail, value, field]) => (
+        <View style={styles.preferenceRow} key={field as string}>
+          <View style={styles.flex}><Text style={styles.preferenceTitle}>{title}</Text><Text style={styles.preferenceDetail}>{detail}</Text></View>
+          <Switch value={value as boolean} onValueChange={(next) => saveNotificationPreference(field as string, next)} trackColor={{ false: '#3b3e45', true: '#8d1522' }} thumbColor={value ? '#ef263b' : '#aaa'} />
+        </View>
+      ))}
+    </ScrollView>
+  );
+
+  const Account = () => {
+    if (accountPage === 'vehicles' && session) return <VehiclesScreen key={session.user.id} userId={session.user.id} onBack={() => setAccountPage('menu')} onBook={reg => { setRegistration(reg); setTab('Book'); }} />;
+    if (accountPage === 'notifications') return NotificationsPage();
+    if (accountPage === 'privacy') return <LegalPage title="Privacy policy"><Text style={styles.legalText}>RevTech Auto Centre collects account details, contact information, vehicle details and booking information only to provide garage services, manage appointments and send requested updates. Data is stored securely and is not sold.</Text><Text style={styles.legalText}>You may request access, correction or deletion from the Account screen or by emailing RevTechautocentre@gmail.com. Account deletion permanently removes your profile, vehicles and booking history.</Text><Text style={styles.legalText}>Contact: RevTech Auto Centre, Unit 13 Brettell Lane Industrial Estate, Brierley Hill, DY5 3LH.</Text></LegalPage>;
+    if (accountPage === 'terms') return <LegalPage title="Terms & conditions"><Text style={styles.legalText}>Booking requests are not confirmed until RevTech Auto Centre contacts you. Estimates may change after inspection, and no work outside the agreed scope will be carried out without approval.</Text><Text style={styles.legalText}>Customers are responsible for providing accurate vehicle and contact details. Collection, payment and warranty arrangements will be confirmed directly by the garage.</Text></LegalPage>;
+    return (
+    <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <Text style={styles.pageTitle}>Account</Text>
       {!isBackendConfigured ? (
         <View style={styles.setupCard}>
@@ -236,7 +326,13 @@ export default function App() {
         <View><Text style={styles.profileName}>{profile?.full_name || 'RevTech Customer'}</Text><Text style={styles.profileSub}>{profile?.phone || session.user.email}</Text></View>
       </View>
       {['My vehicles', 'Booking history', 'Notifications', 'Privacy policy', 'Terms & conditions'].map((item) => (
-        <TouchableOpacity key={item} style={styles.menuRow} onPress={() => Alert.alert(item, 'This section is ready to connect to the secure customer account system.') }>
+        <TouchableOpacity key={item} style={styles.menuRow} onPress={() => {
+          if (item === 'Booking history') setTab('Bookings');
+          else if (item === 'Notifications') setAccountPage('notifications');
+          else if (item === 'Privacy policy') setAccountPage('privacy');
+          else if (item === 'Terms & conditions') setAccountPage('terms');
+          else if (item === 'My vehicles') setAccountPage('vehicles');
+        }}>
           <Text style={styles.menuText}>{item}</Text><Text style={styles.chevron}>›</Text>
         </TouchableOpacity>
       ))}
@@ -262,17 +358,18 @@ export default function App() {
       </TouchableOpacity>
       </>}
     </ScrollView>
-  );
+    );
+  };
 
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar barStyle="light-content" backgroundColor="#08090b" />
-      <Header />
+      {Header()}
       <View style={styles.screen}>
-        {tab === 'Home' && <Home />}
-        {tab === 'Book' && <Book />}
-        {tab === 'Bookings' && <Bookings />}
-        {tab === 'Account' && <Account />}
+        {tab === 'Home' && Home()}
+        {tab === 'Book' && Book()}
+        {tab === 'Bookings' && Bookings()}
+        {tab === 'Account' && Account()}
         {tab === 'Staff' && isStaff && <StaffDashboard />}
       </View>
       <View style={styles.nav}>
@@ -373,6 +470,13 @@ const styles = StyleSheet.create({
   outlineText: { color: '#fff', fontWeight: '900', letterSpacing: 1, fontSize: 12 },
   setupCard: { backgroundColor: '#291b1e', borderWidth: 1, borderColor: '#6a2b34', borderRadius: 14, padding: 18, marginTop: 20 },
   setupTitle: { color: '#fff', fontWeight: '800', fontSize: 16, marginBottom: 8 },
+  back: { color: '#ef4052', fontWeight: '800', marginTop: 4, marginBottom: 12 },
+  legalCard: { backgroundColor: '#15171b', borderWidth: 1, borderColor: '#30333a', borderRadius: 14, padding: 18, marginTop: 20 },
+  legalText: { color: '#b9bbc1', fontSize: 14, lineHeight: 22, marginBottom: 16 },
+  preferenceRow: { flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#292c31', paddingVertical: 18 },
+  preferenceTitle: { color: '#fff', fontSize: 15, fontWeight: '800' },
+  preferenceDetail: { color: '#858991', fontSize: 12, lineHeight: 18, marginTop: 4, paddingRight: 14 },
+  flex: { flex: 1 },
   signOutButton: { paddingVertical: 16, alignItems: 'center', marginTop: 8 },
   signOutText: { color: '#8f939b', fontWeight: '800', fontSize: 12 },
   deleteButton: { paddingVertical: 13, alignItems: 'center' },

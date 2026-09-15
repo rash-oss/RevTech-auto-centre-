@@ -12,6 +12,14 @@
       "resizeMode": "contain",
       "backgroundColor": "#08090b"
     },
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "color": "#dc172a"
+        }
+      ]
+    ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.revtechautocentre.app"
@@ -21,7 +29,8 @@
         "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#08090b"
       },
-      "package": "com.revtechautocentre.app"
+      "package": "com.revtechautocentre.app",
+      "permissions": ["POST_NOTIFICATIONS"]
     },
     "web": {
       "favicon": "./assets/icon.png"

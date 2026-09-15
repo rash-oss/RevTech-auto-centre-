@@ -41,7 +41,25 @@ Never commit `.env` or a Supabase service-role key. The mobile app uses only the
 
 ## Remaining release work
 
-- Push notifications and notification preferences
-- Optional Stripe payment/deposit flow
+- Push delivery backend, device credential setup, delivery receipts and physical-device verification (token registration/preferences are implemented)
+- Optional payment/deposit flow; current bookings are requests, with payment arranged directly with the garage
 - Hosted privacy policy and terms
 - Store screenshots, final device testing, signed builds and submissions
+
+## Verified implementation update
+
+- Saved vehicles: add, edit, remove and reuse registration in a booking.
+- Booking contact details persist to the customer profile before requesting a booking.
+- Booking inputs retain focus across edits; account content is cleared when switching users.
+- Customer status refreshes when opening Bookings, returning to the app, and every 30 seconds while that screen is active.
+- Staff updates wait for server confirmation and report denied/failed writes.
+- TypeScript and Expo exports for both iOS and Android pass. These are not physical-device tests or signed store builds.
+
+## Release blockers still open
+
+- Password reset email exists, but a complete recovery destination and password-change screen need configuring and testing.
+- Push-token registration alone does not send notifications; no delivery backend is wired yet.
+- Hosted policy URLs and store disclosures need verifying against the final build.
+- Live end-to-end tests need customer/staff accounts and real iOS/Android devices.
+- Google developer verification and store testing/review gates remain.
+- The live database has hardened policies in the private schema; do not rerun schema.sql on the existing database.

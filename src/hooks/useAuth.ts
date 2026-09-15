@@ -25,13 +25,16 @@ export function useAuth() {
   }, []);
 
   useEffect(() => {
+    let active = true;
+    setProfile(null);
     if (!session) return;
     supabase
       .from('profiles')
       .select('id, full_name, phone, role')
       .eq('id', session.user.id)
       .single()
-      .then(({ data }) => setProfile(data as Profile | null));
+      .then(({ data }) => { if (active) setProfile(data as Profile | null); });
+    return () => { active = false; };
   }, [session]);
 
   return { session, profile, loading };

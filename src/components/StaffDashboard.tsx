@@ -11,6 +11,7 @@ const labels: Record<BookingStatus, string> = {
 
 export function StaffDashboard() {
   const [bookings, setBookings] = useState<Booking[]>([]);
+  const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
@@ -27,13 +28,14 @@ export function StaffDashboard() {
   useEffect(() => { load(); }, [load]);
 
   const updateStatus = async (id: string, status: BookingStatus) => {
-    const previous = bookings;
-    setBookings((items) => items.map((item) => item.id === id ? { ...item, status } : item));
-    const { error } = await supabase.from('bookings').update({ status }).eq('id', id);
-    if (error) {
-      setBookings(previous);
-      Alert.alert('Update failed', error.message);
-    }
+    if (saving) return;
+    setSaving(true);
+    try {
+      const { data, error } = await supabase.from('bookings').update({ status }).eq('id', id).select('id, status').single();
+      if (error) throw error;
+      setBookings(items => items.map(item => item.id === id ? { ...item, status: data.status } : item));
+    } catch { Alert.alert('Update failed', 'The status was not saved. Please refresh and try again.'); }
+    finally { setSaving(false); }
   };
 
   return (
@@ -55,7 +57,7 @@ export function StaffDashboard() {
           <Text style={styles.changeLabel}>UPDATE REPAIR STATUS</Text>
           <View style={styles.chips}>
             {statuses.map((status) => (
-              <TouchableOpacity key={status} style={[styles.chip, booking.status === status && styles.active]} onPress={() => updateStatus(booking.id, status)}>
+              <TouchableOpacity disabled={saving} key={status} style={[styles.chip, booking.status === status && styles.active]} onPress={() => updateStatus(booking.id, status)}>
                 <Text style={[styles.chipText, booking.status === status && styles.activeText]}>{labels[status]}</Text>
               </TouchableOpacity>
             ))}

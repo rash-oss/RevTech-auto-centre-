@@ -38,6 +38,22 @@ create table public.bookings (
   updated_at timestamptz not null default now()
 );
 
+create table public.notification_preferences (
+  user_id uuid primary key references public.profiles(id) on delete cascade,
+  push_enabled boolean not null default true,
+  booking_updates boolean not null default true,
+  appointment_reminders boolean not null default true,
+  updated_at timestamptz not null default now()
+);
+
+create table public.push_tokens (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  token text not null unique,
+  platform text not null check (platform in ('ios', 'android')),
+  updated_at timestamptz not null default now()
+);
+
 create or replace function public.is_staff()
 returns boolean language sql stable security definer set search_path = public
 as $$
@@ -57,6 +73,7 @@ begin
     coalesce(new.raw_user_meta_data ->> 'full_name', ''),
     coalesce(new.raw_user_meta_data ->> 'phone', '')
   );
+  insert into public.notification_preferences (user_id) values (new.id);
   return new;
 end;
 $$;
@@ -67,6 +84,8 @@ after insert on auth.users for each row execute procedure public.new_user_profil
 alter table public.profiles enable row level security;
 alter table public.vehicles enable row level security;
 alter table public.bookings enable row level security;
+alter table public.notification_preferences enable row level security;
+alter table public.push_tokens enable row level security;
 
 create policy "Customers read own profile" on public.profiles
   for select using (id = auth.uid() or public.is_staff());
@@ -92,6 +111,22 @@ create policy "Customers create own bookings" on public.bookings
   for insert with check (customer_id = auth.uid());
 create policy "Staff update bookings" on public.bookings
   for update using (public.is_staff()) with check (public.is_staff());
+
+create policy "Customers read own notification preferences" on public.notification_preferences
+  for select using (user_id = auth.uid());
+create policy "Customers add own notification preferences" on public.notification_preferences
+  for insert with check (user_id = auth.uid());
+create policy "Customers update own notification preferences" on public.notification_preferences
+  for update using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+create policy "Customers read own push tokens" on public.push_tokens
+  for select using (user_id = auth.uid());
+create policy "Customers add own push tokens" on public.push_tokens
+  for insert with check (user_id = auth.uid());
+create policy "Customers update own push tokens" on public.push_tokens
+  for update using (user_id = auth.uid()) with check (user_id = auth.uid());
+create policy "Customers delete own push tokens" on public.push_tokens
+  for delete using (user_id = auth.uid());
 
 create or replace function public.delete_own_account()
 returns void language sql security definer set search_path = auth, public
