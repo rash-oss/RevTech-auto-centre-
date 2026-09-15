@@ -15,6 +15,8 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { PasswordRecovery } from './src/components/PasswordRecovery';
+import { useAuthLinks } from './src/hooks/useAuthLinks';
 import { VehiclesScreen } from './src/components/VehiclesScreen';
 import { AuthScreen } from './src/components/AuthScreen';
 import { StaffDashboard } from './src/components/StaffDashboard';
@@ -44,6 +46,7 @@ const customerTabs: { key: Tab; icon: string }[] = [
 
 export default function App() {
   const { session, profile, loading: authLoading } = useAuth();
+  const { recovering, finishRecovery } = useAuthLinks();
   const [tab, setTab] = useState<Tab>('Home');
   const [service, setService] = useState('');
   const [registration, setRegistration] = useState('');
@@ -56,7 +59,7 @@ export default function App() {
   const [accountPage, setAccountPage] = useState<AccountPage>('menu');
   const [pushEnabled, setPushEnabled] = useState(true);
   const [bookingUpdates, setBookingUpdates] = useState(true);
-  const [appointmentReminders, setAppointmentReminders] = useState(true);
+  const [preferenceBusy, setPreferenceBusy] = useState(false);
 
   usePushNotifications(session);
 
@@ -102,33 +105,30 @@ export default function App() {
   }, [loadBookings, tab]);
 
   useEffect(() => {
+    let active = true;
+    setPushEnabled(true); setBookingUpdates(true);
     if (!session) return;
-    supabase.from('notification_preferences').select('*').eq('user_id', session.user.id).single()
+    supabase.from('notification_preferences').select('*').eq('user_id', session.user.id).maybeSingle()
       .then(({ data }) => {
-        if (!data) return;
+        if (!active || !data) return;
         setPushEnabled(data.push_enabled);
         setBookingUpdates(data.booking_updates);
-        setAppointmentReminders(data.appointment_reminders);
       });
-  }, [session]);
+    return () => { active = false; };
+  }, [session?.user.id]);
 
   const saveNotificationPreference = async (field: string, value: boolean) => {
-    if (!session) return;
-    const setters: Record<string, (next: boolean) => void> = {
-      push_enabled: setPushEnabled,
-      booking_updates: setBookingUpdates,
-      appointment_reminders: setAppointmentReminders,
-    };
-    setters[field]?.(value);
-    const { error } = await supabase.from('notification_preferences').upsert({
-      user_id: session.user.id,
-      [field]: value,
-      updated_at: new Date().toISOString(),
-    });
-    if (error) {
-      setters[field]?.(!value);
-      Alert.alert('Could not save preference', error.message);
-    }
+    if (!session || preferenceBusy) return;
+    const userId = session.user.id;
+    setPreferenceBusy(true);
+    const next = { push_enabled: pushEnabled, booking_updates: bookingUpdates, [field]: value };
+    try {
+      const { error } = await supabase.from('notification_preferences').upsert({ user_id: userId, ...next, updated_at: new Date().toISOString() });
+      if (error) throw error;
+      if (currentUser.current === userId) { setPushEnabled(next.push_enabled); setBookingUpdates(next.booking_updates); }
+    } catch (error) {
+      Alert.alert('Could not save preference', error instanceof Error ? error.message : 'Please try again.');
+    } finally { setPreferenceBusy(false); }
   };
 
   const submitBooking = async () => {
@@ -295,13 +295,12 @@ export default function App() {
       <Text style={styles.pageTitle}>Notifications</Text>
       <Text style={styles.pageIntro}>Choose which RevTech updates you receive.</Text>
       {[
-        ['Push notifications', 'Allow notifications on this device', pushEnabled, 'push_enabled'],
+        ['Push notifications', 'Receive updates on your signed-in devices', pushEnabled, 'push_enabled'],
         ['Booking updates', 'Status changes including ready for collection', bookingUpdates, 'booking_updates'],
-        ['Appointment reminders', 'Reminders about confirmed bookings', appointmentReminders, 'appointment_reminders'],
       ].map(([title, detail, value, field]) => (
         <View style={styles.preferenceRow} key={field as string}>
           <View style={styles.flex}><Text style={styles.preferenceTitle}>{title}</Text><Text style={styles.preferenceDetail}>{detail}</Text></View>
-          <Switch value={value as boolean} onValueChange={(next) => saveNotificationPreference(field as string, next)} trackColor={{ false: '#3b3e45', true: '#8d1522' }} thumbColor={value ? '#ef263b' : '#aaa'} />
+          <Switch disabled={preferenceBusy} value={value as boolean} onValueChange={(next) => saveNotificationPreference(field as string, next)} trackColor={{ false: '#3b3e45', true: '#8d1522' }} thumbColor={value ? '#ef263b' : '#aaa'} />
         </View>
       ))}
     </ScrollView>
@@ -348,18 +347,23 @@ export default function App() {
         [
           { text: 'Cancel', style: 'cancel' },
           { text: 'Delete permanently', style: 'destructive', onPress: async () => {
-            const { error } = await supabase.rpc('delete_own_account');
-            if (error) Alert.alert('Could not delete account', error.message);
-            else await supabase.auth.signOut();
+            try {
+              const { data, error } = await supabase.functions.invoke('delete-account', { body: {} });
+              if (error || !data?.deleted) throw error || new Error('Please try again.');
+              await supabase.auth.signOut({ scope: 'local' });
+            } catch (error) { Alert.alert('Could not delete account', error instanceof Error ? error.message : 'Please try again.'); }
           } },
         ],
       )}>
         <Text style={styles.deleteText}>DELETE MY ACCOUNT</Text>
       </TouchableOpacity>
       </>}
+      {!session && ['Privacy policy', 'Terms & conditions'].map((title, index) => <TouchableOpacity key={title} style={styles.menuRow} onPress={() => setAccountPage(index === 0 ? 'privacy' : 'terms')}><Text style={styles.menuText}>{title}</Text></TouchableOpacity>)}
     </ScrollView>
     );
   };
+
+  if (recovering) return <SafeAreaView style={styles.safe}><ScrollView keyboardShouldPersistTaps="handled"><PasswordRecovery onDone={finishRecovery} /></ScrollView></SafeAreaView>;
 
   return (
     <SafeAreaView style={styles.safe}>

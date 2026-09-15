@@ -30,7 +30,9 @@
         "backgroundColor": "#08090b"
       },
       "package": "com.revtechautocentre.app",
-      "permissions": ["POST_NOTIFICATIONS"]
+      "permissions": [
+        "POST_NOTIFICATIONS"
+      ]
     },
     "web": {
       "favicon": "./assets/icon.png"
@@ -39,6 +41,7 @@
       "eas": {
         "projectId": "663fb733-f49f-425b-957c-517c60aae14b"
       }
-    }
+    },
+    "scheme": "revtech"
   }
 }

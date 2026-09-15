@@ -11,17 +11,19 @@ export function useAuth() {
   useEffect(() => {
     if (!isBackendConfigured) return;
 
+    let active = true;
     supabase.auth.getSession().then(({ data }) => {
+      if (!active) return;
       setSession(data.session);
       setLoading(false);
-    });
+    }).catch(() => { if (active) setLoading(false); });
 
     const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession);
       if (!nextSession) setProfile(null);
     });
 
-    return () => data.subscription.unsubscribe();
+    return () => { active = false; data.subscription.unsubscribe(); };
   }, []);
 
   useEffect(() => {

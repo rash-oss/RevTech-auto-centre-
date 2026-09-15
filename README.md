@@ -16,7 +16,7 @@ Customer mobile app for RevTech Auto Centre, built with Expo and React Native.
 
 ## Run the app
 
-1. Install Node.js 20 or newer.
+1. Install Node.js 22 or newer.
 2. Run `npm install`.
 3. Run `npx expo start`.
 4. Scan the QR code using Expo Go on iPhone or Android.
@@ -57,9 +57,19 @@ Never commit `.env` or a Supabase service-role key. The mobile app uses only the
 
 ## Release blockers still open
 
-- Password reset email exists, but a complete recovery destination and password-change screen need configuring and testing.
-- Push-token registration alone does not send notifications; no delivery backend is wired yet.
+- Password recovery screen and deep-link handling implemented. Supabase Auth URL Configuration must allow `revtech://auth/callback`; email delivery and installed-build recovery still need testing. The connector cannot change the Auth redirect allowlist.
+- Push queue SQL is installed, but the scheduled sender is INACTIVE. Deployment of the prepared worker was blocked by automatic approval review pending explicit approval to send device tokens and booking-status text to Expo. Worker code has not been deployed or runtime-tested.
 - Hosted policy URLs and store disclosures need verifying against the final build.
 - Live end-to-end tests need customer/staff accounts and real iOS/Android devices.
 - Google developer verification and store testing/review gates remain.
 - The live database has hardened policies in the private schema; do not rerun schema.sql on the existing database.
+
+## 15 September release fixes
+
+- Account deletion now invokes the existing authenticated `delete-account` Edge Function rather than a nonexistent database RPC.
+- Password recovery supports the `revtech://auth/callback` link and a password-change screen. Signup confirmation uses the same callback. Requires a rebuilt app and the Auth redirect allowlist setting above.
+- Privacy and terms can be opened without signing in.
+- Notification preference writes preserve the other switch and report failures. Removed the appointment-reminder switch because no reminder implementation exists.
+- Push delivery preparation: `supabase/push_delivery.sql`, `supabase/functions/booking-notifications/index.ts`. Server-only queue, preference checks, retry leases, ticket/receipt processing and invalid-device cleanup. No sender is active and no notifications have been sent.
+- Remaining notification hardening before activation: verify sign-out/device token cleanup and shared-device account switching; test the worker with mocked Expo responses and on physical phones; check APNs/FCM credentials. Do not enable the cron job until explicit Expo data-transfer approval and these checks are complete.
+- Mobile typecheck and iOS/Android exports pass; signed builds, store metadata, hosted policy links and device tests remain outstanding.

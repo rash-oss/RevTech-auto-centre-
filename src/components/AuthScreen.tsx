@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { AUTH_REDIRECT } from '../hooks/useAuthLinks';
 import { supabase } from '../lib/supabase';
 
 export function AuthScreen() {
@@ -11,19 +12,20 @@ export function AuthScreen() {
   const [busy, setBusy] = useState(false);
 
   const submit = async () => {
+    if (busy) return;
     if (!email.trim() || password.length < 8 || (mode === 'signup' && (!fullName.trim() || !phone.trim()))) {
       Alert.alert('Check your details', 'Enter a valid email, an 8-character password, your name and phone number.');
       return;
     }
     setBusy(true);
+    try {
     const result = mode === 'login'
       ? await supabase.auth.signInWithPassword({ email: email.trim(), password })
       : await supabase.auth.signUp({
           email: email.trim(),
           password,
-          options: { data: { full_name: fullName.trim(), phone: phone.trim() } },
+          options: { emailRedirectTo: AUTH_REDIRECT, data: { full_name: fullName.trim(), phone: phone.trim() } },
         });
-    setBusy(false);
 
     if (result.error) {
       Alert.alert(mode === 'login' ? 'Could not sign in' : 'Could not create account', result.error.message);
@@ -33,6 +35,10 @@ export function AuthScreen() {
       Alert.alert('Check your email', 'Open the confirmation email, then return here to sign in.');
       setMode('login');
     }
+    } catch (error) {
+      Alert.alert('Connection problem', 'Please check your connection and try again.');
+    } finally { setBusy(false); }
+
   };
 
   const resetPassword = async () => {
@@ -40,8 +46,15 @@ export function AuthScreen() {
       Alert.alert('Email needed', 'Enter your email address first.');
       return;
     }
-    const { error } = await supabase.auth.resetPasswordForEmail(email.trim());
-    Alert.alert(error ? 'Could not send email' : 'Email sent', error?.message || 'Check your inbox for a password reset link.');
+    if (busy) return;
+    setBusy(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: AUTH_REDIRECT });
+      if (error) throw error;
+      Alert.alert('Check your email', 'If an account exists, a reset link will arrive shortly. Open it on the phone with RevTech installed.');
+    } catch (error) {
+      Alert.alert('Could not send email', error instanceof Error ? error.message : 'Please try again.');
+    } finally { setBusy(false); }
   };
 
   return (
@@ -59,7 +72,7 @@ export function AuthScreen() {
       <TouchableOpacity style={[styles.primary, busy && styles.disabled]} disabled={busy} onPress={submit}>
         <Text style={styles.primaryText}>{busy ? 'PLEASE WAIT…' : mode === 'login' ? 'SIGN IN' : 'CREATE ACCOUNT'}</Text>
       </TouchableOpacity>
-      {mode === 'login' && <TouchableOpacity onPress={resetPassword}><Text style={styles.link}>Forgot password?</Text></TouchableOpacity>}
+      {mode === 'login' && <TouchableOpacity disabled={busy} onPress={resetPassword}><Text style={styles.link}>Forgot password?</Text></TouchableOpacity>}
       <TouchableOpacity onPress={() => setMode(mode === 'login' ? 'signup' : 'login')}>
         <Text style={styles.switch}>{mode === 'login' ? 'New customer? Create an account' : 'Already registered? Sign in'}</Text>
       </TouchableOpacity>
