@@ -31,7 +31,7 @@ Deno.serve(async (req: Request) => {
         ]);
         if (token.error || pref.error) throw new Error('Preferences lookup failed');
         if (!token.data || pref.data?.push_enabled === false || pref.data?.booking_updates === false) { await update(job.id, { state: 'skipped' }); continue; }
-        const result = await post('send', [{ to: token.data.token, title: 'RevTech booking update', body: `Your booking is now ${job.booking_status.replaceAll('_', ' ')}. Open RevTech for details.`, sound: 'default', channelId: 'booking-updates', data: { bookingId: job.booking_id }, ttl: 3600 }]);
+        const result = await post('send', [{ to: token.data.token, title: 'RevTech booking update', body: 'Your booking has been updated. Open RevTech for details.', sound: 'default', channelId: 'booking-updates', ttl: 3600 }]);
         const ticket = result.data?.[0];
         if (ticket?.status === 'ok' && ticket.id) {
           await update(job.id, { state: 'ticket', ticket_id: ticket.id, available_at: new Date(Date.now() + 15 * 60000).toISOString() });

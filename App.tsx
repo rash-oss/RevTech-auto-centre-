@@ -21,7 +21,7 @@ import { VehiclesScreen } from './src/components/VehiclesScreen';
 import { AuthScreen } from './src/components/AuthScreen';
 import { StaffDashboard } from './src/components/StaffDashboard';
 import { useAuth } from './src/hooks/useAuth';
-import { usePushNotifications } from './src/hooks/usePushNotifications';
+import { detachPushToken, usePushNotifications } from './src/hooks/usePushNotifications';
 import { isBackendConfigured, supabase } from './src/lib/supabase';
 import type { Booking } from './src/types';
 
@@ -338,7 +338,13 @@ export default function App() {
       <TouchableOpacity style={styles.outlineButton} onPress={() => Linking.openURL('tel:07306478555')}>
         <Text style={styles.outlineText}>CONTACT REVTECH</Text>
       </TouchableOpacity>
-      <TouchableOpacity style={styles.signOutButton} onPress={() => supabase.auth.signOut()}>
+      <TouchableOpacity style={styles.signOutButton} onPress={async () => {
+        try {
+          await detachPushToken(session.user.id);
+          const { error } = await supabase.auth.signOut();
+          if (error) throw error;
+        } catch { Alert.alert('Could not sign out', 'Please check your connection and try again so this device can stop receiving your notifications.'); }
+      }}>
         <Text style={styles.signOutText}>SIGN OUT</Text>
       </TouchableOpacity>
       <TouchableOpacity style={styles.deleteButton} onPress={() => Alert.alert(

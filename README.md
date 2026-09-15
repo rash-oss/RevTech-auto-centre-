@@ -58,7 +58,7 @@ Never commit `.env` or a Supabase service-role key. The mobile app uses only the
 ## Release blockers still open
 
 - Password recovery screen and deep-link handling implemented. Supabase Auth URL Configuration must allow `revtech://auth/callback`; email delivery and installed-build recovery still need testing. The connector cannot change the Auth redirect allowlist.
-- Push queue SQL is installed, but the scheduled sender is INACTIVE. Deployment of the prepared worker was blocked by automatic approval review pending explicit approval to send device tokens and booking-status text to Expo. Worker code has not been deployed or runtime-tested.
+- Push worker is deployed and its two-minute schedule is enabled following explicit approval for device tokens and a generic message to go to Expo. No booking ID, status, name or registration is sent in the payload. Real-device delivery and APNs/FCM credentials remain unverified.
 - Hosted policy URLs and store disclosures need verifying against the final build.
 - Live end-to-end tests need customer/staff accounts and real iOS/Android devices.
 - Google developer verification and store testing/review gates remain.
@@ -70,6 +70,6 @@ Never commit `.env` or a Supabase service-role key. The mobile app uses only the
 - Password recovery supports the `revtech://auth/callback` link and a password-change screen. Signup confirmation uses the same callback. Requires a rebuilt app and the Auth redirect allowlist setting above.
 - Privacy and terms can be opened without signing in.
 - Notification preference writes preserve the other switch and report failures. Removed the appointment-reminder switch because no reminder implementation exists.
-- Push delivery preparation: `supabase/push_delivery.sql`, `supabase/functions/booking-notifications/index.ts`. Server-only queue, preference checks, retry leases, ticket/receipt processing and invalid-device cleanup. No sender is active and no notifications have been sent.
-- Remaining notification hardening before activation: verify sign-out/device token cleanup and shared-device account switching; test the worker with mocked Expo responses and on physical phones; check APNs/FCM credentials. Do not enable the cron job until explicit Expo data-transfer approval and these checks are complete.
+- Push delivery preparation: `supabase/push_delivery.sql`, `supabase/functions/booking-notifications/index.ts`. Server-only queue, preference checks, retry leases, ticket/receipt processing and invalid-device cleanup. Sender deployed; authenticated empty-queue smoke check returned HTTP 200. No customer notification was sent during testing.
+- Sign-out now removes this device token before ending the session. Mock worker checks cover missing authentication, generic payload, ticket recording and opt-out suppression. Mobile typecheck and both platform exports pass. Shared-device switching, retry/receipt failure paths and actual phone delivery still require end-to-end testing.
 - Mobile typecheck and iOS/Android exports pass; signed builds, store metadata, hosted policy links and device tests remain outstanding.

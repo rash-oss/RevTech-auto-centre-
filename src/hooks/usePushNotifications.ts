@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect } from 'react';
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
@@ -15,11 +16,26 @@ Notifications.setNotificationHandler({
   }),
 });
 
+let pendingRegistration: Promise<void> = Promise.resolve();
+let generation = 0;
+const tokenStorageKey = 'revtech.registeredPushToken';
+
+export async function detachPushToken(userId: string) {
+  generation++;
+  await pendingRegistration;
+  const token = await AsyncStorage.getItem(tokenStorageKey);
+  if (!token) return;
+  const { error } = await supabase.from('push_tokens').delete().eq('user_id', userId).eq('token', token);
+  if (error) throw error;
+  await AsyncStorage.removeItem(tokenStorageKey);
+}
+
 export function usePushNotifications(session: Session | null) {
   useEffect(() => {
     if (!session || !Device.isDevice) return;
 
     let active = true;
+    const currentGeneration = ++generation;
     const register = async () => {
       if (Platform.OS === 'android') {
         await Notifications.setNotificationChannelAsync('booking-updates', {
@@ -32,23 +48,25 @@ export function usePushNotifications(session: Session | null) {
       const permission = current.status === 'granted'
         ? current
         : await Notifications.requestPermissionsAsync();
-      if (!active || permission.status !== 'granted') return;
+      if (currentGeneration !== generation || !active || permission.status !== 'granted') return;
 
       const projectId = Constants.expoConfig?.extra?.eas?.projectId
         || Constants.easConfig?.projectId;
       if (!projectId) return;
 
       const token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
-      if (!active) return;
-      await supabase.from('push_tokens').upsert({
+      if (currentGeneration !== generation || !active) return;
+      await AsyncStorage.setItem(tokenStorageKey, token);
+      const { error } = await supabase.from('push_tokens').upsert({
         user_id: session.user.id,
         token,
         platform: Platform.OS,
         updated_at: new Date().toISOString(),
       }, { onConflict: 'token' });
+      if (error) throw error;
     };
 
-    register().catch(() => undefined);
+    pendingRegistration = register().catch(() => undefined);
     return () => { active = false; };
-  }, [session]);
+  }, [session?.user.id]);
 }
