@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Image,
   Linking,
@@ -12,8 +13,13 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { AuthScreen } from './src/components/AuthScreen';
+import { StaffDashboard } from './src/components/StaffDashboard';
+import { useAuth } from './src/hooks/useAuth';
+import { isBackendConfigured, supabase } from './src/lib/supabase';
+import type { Booking } from './src/types';
 
-type Tab = 'Home' | 'Book' | 'Bookings' | 'Account';
+type Tab = 'Home' | 'Book' | 'Bookings' | 'Account' | 'Staff';
 
 const services = [
   { icon: '🛠️', name: 'Vehicle Repair', detail: 'Diagnostics and repairs' },
@@ -24,7 +30,7 @@ const services = [
   { icon: '❄️', name: 'Air Conditioning', detail: 'Recharge and repair' },
 ];
 
-const tabs: { key: Tab; icon: string }[] = [
+const customerTabs: { key: Tab; icon: string }[] = [
   { key: 'Home', icon: '⌂' },
   { key: 'Book', icon: '＋' },
   { key: 'Bookings', icon: '▣' },
@@ -32,6 +38,7 @@ const tabs: { key: Tab; icon: string }[] = [
 ];
 
 export default function App() {
+  const { session, profile, loading: authLoading } = useAuth();
   const [tab, setTab] = useState<Tab>('Home');
   const [service, setService] = useState('');
   const [registration, setRegistration] = useState('');
@@ -39,7 +46,11 @@ export default function App() {
   const [phone, setPhone] = useState('');
   const [date, setDate] = useState('');
   const [notes, setNotes] = useState('');
-  const [bookingMade, setBookingMade] = useState(false);
+  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [bookingBusy, setBookingBusy] = useState(false);
+
+  const isStaff = profile?.role === 'staff' || profile?.role === 'admin';
+  const tabs = isStaff ? [...customerTabs, { key: 'Staff' as Tab, icon: '◆' }] : customerTabs;
 
   const canSubmit = useMemo(
     () => Boolean(service && registration.trim() && name.trim() && phone.trim() && date.trim()),
@@ -51,13 +62,46 @@ export default function App() {
     setTab('Book');
   };
 
-  const submitBooking = () => {
+  const loadBookings = useCallback(async () => {
+    if (!session || !isBackendConfigured) return;
+    const { data, error } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('customer_id', session.user.id)
+      .order('created_at', { ascending: false });
+    if (error) Alert.alert('Could not load bookings', error.message);
+    else setBookings((data || []) as Booking[]);
+  }, [session]);
+
+  useEffect(() => { loadBookings(); }, [loadBookings]);
+
+  const submitBooking = async () => {
     if (!canSubmit) {
       Alert.alert('Missing details', 'Please complete all required fields.');
       return;
     }
-    setBookingMade(true);
+    if (!session || !isBackendConfigured) {
+      setTab('Account');
+      Alert.alert('Sign in required', 'Create or sign in to your secure account before requesting a booking.');
+      return;
+    }
+    setBookingBusy(true);
+    const { error } = await supabase.from('bookings').insert({
+      customer_id: session.user.id,
+      service,
+      registration: registration.trim(),
+      preferred_date: date.trim(),
+      notes: notes.trim() || null,
+    });
+    setBookingBusy(false);
+    if (error) {
+      Alert.alert('Booking not sent', error.message);
+      return;
+    }
+    await loadBookings();
     setTab('Bookings');
+    setNotes('');
+    Alert.alert('Booking requested', 'RevTech has received your request and will contact you to confirm it.');
   };
 
   const Header = () => (
@@ -132,8 +176,8 @@ export default function App() {
       <Field label="PHONE NUMBER *" value={phone} onChangeText={setPhone} placeholder="07..." keyboardType="phone-pad" />
       <Field label="PREFERRED DATE *" value={date} onChangeText={setDate} placeholder="e.g. Monday 21 September" />
       <Field label="NOTES" value={notes} onChangeText={setNotes} placeholder="Tell us about the problem" multiline />
-      <TouchableOpacity style={[styles.primary, !canSubmit && styles.primaryDisabled]} onPress={submitBooking}>
-        <Text style={styles.primaryText}>REQUEST BOOKING</Text>
+      <TouchableOpacity disabled={bookingBusy} style={[styles.primary, (!canSubmit || bookingBusy) && styles.primaryDisabled]} onPress={submitBooking}>
+        <Text style={styles.primaryText}>{bookingBusy ? 'SENDING…' : 'REQUEST BOOKING'}</Text>
       </TouchableOpacity>
       <Text style={styles.disclaimer}>Your booking is confirmed only after the garage contacts you.</Text>
     </ScrollView>
@@ -142,30 +186,30 @@ export default function App() {
   const Bookings = () => (
     <ScrollView contentContainerStyle={styles.content}>
       <Text style={styles.pageTitle}>My bookings</Text>
-      {bookingMade ? (
-        <View style={styles.bookingCard}>
+      {bookings.length ? bookings.map((booking) => (
+        <View style={styles.bookingCard} key={booking.id}>
           <View style={styles.bookingTop}>
             <View>
-              <Text style={styles.bookingService}>{service}</Text>
-              <Text style={styles.bookingReg}>{registration}</Text>
+              <Text style={styles.bookingService}>{booking.service}</Text>
+              <Text style={styles.bookingReg}>{booking.registration}</Text>
             </View>
-            <View style={styles.statusPill}><Text style={styles.statusText}>REQUESTED</Text></View>
+            <View style={styles.statusPill}><Text style={styles.statusText}>{booking.status.replace('_', ' ').toUpperCase()}</Text></View>
           </View>
           <View style={styles.divider} />
-          <Text style={styles.infoLine}>Preferred date: {date}</Text>
-          <Text style={styles.infoLine}>We’ll call {phone} to confirm.</Text>
+          <Text style={styles.infoLine}>Preferred date: {booking.preferred_date}</Text>
+          <Text style={styles.infoLine}>RevTech will contact you to confirm.</Text>
           <View style={styles.progressRow}>
-            <View style={[styles.progressDot, styles.progressDone]} />
+            <View style={[styles.progressDot, booking.status !== 'cancelled' && styles.progressDone]} />
             <View style={styles.progressLine} />
-            <View style={styles.progressDot} />
+            <View style={[styles.progressDot, ['in_progress', 'ready', 'completed'].includes(booking.status) && styles.progressDone]} />
             <View style={styles.progressLine} />
-            <View style={styles.progressDot} />
+            <View style={[styles.progressDot, ['ready', 'completed'].includes(booking.status) && styles.progressDone]} />
           </View>
           <View style={styles.progressLabels}>
             <Text style={styles.progressText}>Requested</Text><Text style={styles.progressText}>In progress</Text><Text style={styles.progressText}>Ready</Text>
           </View>
         </View>
-      ) : (
+      )) : (
         <View style={styles.empty}>
           <Text style={styles.emptyIcon}>▣</Text>
           <Text style={styles.emptyTitle}>No bookings yet</Text>
@@ -181,9 +225,15 @@ export default function App() {
   const Account = () => (
     <ScrollView contentContainerStyle={styles.content}>
       <Text style={styles.pageTitle}>Account</Text>
+      {!isBackendConfigured ? (
+        <View style={styles.setupCard}>
+          <Text style={styles.setupTitle}>Secure accounts are ready to connect</Text>
+          <Text style={styles.infoLine}>The live database keys still need adding before customer sign-in can be used.</Text>
+        </View>
+      ) : authLoading ? <ActivityIndicator color="#dc172a" size="large" /> : !session ? <AuthScreen /> : <>
       <View style={styles.profileCard}>
-        <View style={styles.avatar}><Text style={styles.avatarText}>{name ? name[0].toUpperCase() : 'R'}</Text></View>
-        <View><Text style={styles.profileName}>{name || 'RevTech Customer'}</Text><Text style={styles.profileSub}>{phone || 'Add your details when booking'}</Text></View>
+        <View style={styles.avatar}><Text style={styles.avatarText}>{profile?.full_name?.[0]?.toUpperCase() || 'R'}</Text></View>
+        <View><Text style={styles.profileName}>{profile?.full_name || 'RevTech Customer'}</Text><Text style={styles.profileSub}>{profile?.phone || session.user.email}</Text></View>
       </View>
       {['My vehicles', 'Booking history', 'Notifications', 'Privacy policy', 'Terms & conditions'].map((item) => (
         <TouchableOpacity key={item} style={styles.menuRow} onPress={() => Alert.alert(item, 'This section is ready to connect to the secure customer account system.') }>
@@ -193,6 +243,24 @@ export default function App() {
       <TouchableOpacity style={styles.outlineButton} onPress={() => Linking.openURL('tel:07306478555')}>
         <Text style={styles.outlineText}>CONTACT REVTECH</Text>
       </TouchableOpacity>
+      <TouchableOpacity style={styles.signOutButton} onPress={() => supabase.auth.signOut()}>
+        <Text style={styles.signOutText}>SIGN OUT</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={styles.deleteButton} onPress={() => Alert.alert(
+        'Delete account?',
+        'This permanently deletes your account, vehicles and booking history.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Delete permanently', style: 'destructive', onPress: async () => {
+            const { error } = await supabase.rpc('delete_own_account');
+            if (error) Alert.alert('Could not delete account', error.message);
+            else await supabase.auth.signOut();
+          } },
+        ],
+      )}>
+        <Text style={styles.deleteText}>DELETE MY ACCOUNT</Text>
+      </TouchableOpacity>
+      </>}
     </ScrollView>
   );
 
@@ -205,6 +273,7 @@ export default function App() {
         {tab === 'Book' && <Book />}
         {tab === 'Bookings' && <Bookings />}
         {tab === 'Account' && <Account />}
+        {tab === 'Staff' && isStaff && <StaffDashboard />}
       </View>
       <View style={styles.nav}>
         {tabs.map((item) => (
@@ -302,6 +371,12 @@ const styles = StyleSheet.create({
   chevron: { color: '#747880', fontSize: 25 },
   outlineButton: { borderWidth: 1, borderColor: '#dc172a', borderRadius: 10, paddingVertical: 15, alignItems: 'center', marginTop: 28 },
   outlineText: { color: '#fff', fontWeight: '900', letterSpacing: 1, fontSize: 12 },
+  setupCard: { backgroundColor: '#291b1e', borderWidth: 1, borderColor: '#6a2b34', borderRadius: 14, padding: 18, marginTop: 20 },
+  setupTitle: { color: '#fff', fontWeight: '800', fontSize: 16, marginBottom: 8 },
+  signOutButton: { paddingVertical: 16, alignItems: 'center', marginTop: 8 },
+  signOutText: { color: '#8f939b', fontWeight: '800', fontSize: 12 },
+  deleteButton: { paddingVertical: 13, alignItems: 'center' },
+  deleteText: { color: '#d75a66', fontWeight: '800', fontSize: 11 },
   nav: { height: 68, flexDirection: 'row', backgroundColor: '#0e1013', borderTopWidth: 1, borderTopColor: '#292c31', paddingBottom: 4 },
   navItem: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   navIcon: { color: '#666a73', fontSize: 18, marginBottom: 2 },
